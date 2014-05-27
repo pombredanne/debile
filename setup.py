@@ -19,13 +19,14 @@ flavors = {
         'debile', 'debile.utils'
     ], {
         'console_scripts': [
-            'aget = debile.utils.aget:main',
-            'bget = debile.utils.bget:main',
+            'debile-remote = debile.utils.cli:main',
         ],
     }),  # Default config
     "setup.slave.py": ("debile.slave", [
         'debile.slave',
         'debile.slave.commands',
+        'debile.slave.runners',
+        'debile.slave.wrappers',
     ], {
         'console_scripts': [
             'debile-slave = debile.slave.cli:daemon',
@@ -35,10 +36,9 @@ flavors = {
         'debile.master'
     ], {
         'console_scripts': [
+            'debile-master = debile.master.cli:server',
             'debile-master-init = debile.master.cli:init',
             'debile-incoming = debile.master.cli:process_incoming',
-            'debile-import = debile.master.cli:import_db',
-            'debile-master = debile.master.cli:serve',
         ],
     }),  # Master config
 }

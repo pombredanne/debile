@@ -21,14 +21,15 @@
 # DEALINGS IN THE SOFTWARE.
 
 from debile.slave.wrappers.findbugs import parse_findbugs
-from debile.slave.utils import run_command, cd
+from debile.slave.utils import cd
+from debile.utils.commands import run_command
 
 
 def findbugs(deb, analysis):
     run_command(["dpkg", "-x", deb, "binary"])
     with cd('binary'):
         out, err, ret = run_command([
-                'fb', 'analyze', '-effort:max', '-xml:withMessages', '.'
+            'fb', 'analyze', '-effort:max', '-xml:withMessages', '.'
         ])
 
         xmlbytes = out.encode("utf-8")

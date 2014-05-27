@@ -18,7 +18,9 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from debile.utils import run_command
+from debile.utils.commands import run_command
+from debian.deb822 import Sources
+from gzip import GzipFile
 
 
 class RepoException(Exception):
@@ -39,7 +41,7 @@ class Repo(object):
         self.include(dist, changes.get_changes_file())
 
     def _exec(self, *args):
-        cmd = ["reprepro", "-Vb", self.root,] + list(args)
+        cmd = ["reprepro", "-Vb", self.root] + list(args)
         out, err, ret = run_command(cmd)
         if ret != 0:
             raise RepoException(ret)
@@ -68,3 +70,21 @@ class Repo(object):
 
     def clearvanished(self):
         raise NotImplemented()
+
+    def find_dsc(self, source):
+        sources = "{root}/dists/{suite}/{component}/source/Sources.gz".format(
+            root=self.root,
+            suite=source.suite.name,
+            component=source.component.name
+        )
+
+        for entry in Sources.iter_paragraphs(GzipFile(filename=sources)):
+            if entry['Package'] == source.name and entry['Version'] == source.version:
+                dsc = None
+                for line in entry['Files']:
+                    if line['name'].endswith(".dsc"):
+                        dsc = line['name']
+                        break
+                return (entry['Directory'], dsc)
+
+        raise Exception("Package not found in Sources.gz")

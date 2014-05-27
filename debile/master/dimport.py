@@ -19,83 +19,113 @@
 # DEALINGS IN THE SOFTWARE.
 
 import yaml
-import datetime as dt
-
+from datetime import datetime
+from sqlalchemy.sql import exists
 
 from debile.master.utils import session
-from debile.master.orm import (Person, Builder, Group, Suite,
-                               GroupArch, GroupSuite, Check, Arch)
-from sqlalchemy.orm.exc import NoResultFound
+from debile.master.orm import (Person, Builder, Suite, Component, Arch, Check,
+                               Group, GroupSuite, Base)
+
+DEADBEEF = "0000000000000000DEADBEEF0000000000000000"
 
 
-def import_from_yaml(whence):
-    return import_dict(yaml.safe_load(open(whence, 'r')))
+def main(args, config):
+    obj = yaml.safe_load(open(args.file, 'r'))
 
-
-def import_dict(obj):
-    maintainer = obj.pop("Maintainer")
-    users = obj.pop("Users")
-    builders = obj.pop("Builders")
-    suites = obj.pop("Suites")
-    groups = obj.pop("Groups")
-    checks = obj.pop("Checks")
-    arches = obj.pop("Arches")
-
-    if obj != {}:
-        for key in obj:
-            print "Igorning key %s" % (key)
+    users = obj.pop("Users", [])
+    builders = obj.pop("Builders", [])
+    suites = obj.pop("Suites", [])
+    components = obj.pop("Components", [])
+    arches = obj.pop("Arches", [])
+    checks = obj.pop("Checks", [])
+    groups = obj.pop("Groups", [])
 
     with session() as s:
+        Base.metadata.create_all(s.bind)
+
         for user in users:
-            existing = None
-            try:
-                existing = s.query(Person).filter_by(
-                    username=user['username']
-                ).one()
-            except NoResultFound:
-                pass
-
-            p = Person(**user)
-
-            if existing:
-                p.id = existing.id
-                s.merge(p)
-            else:
-                s.add(p)
+            s.add(Person(**user))
 
         for builder in builders:
-            username = builder.pop('maintainer')
-            who = s.query(Person).filter_by(username=username).one()
+            who = s.query(Person).filter_by(email=builder['maintainer']).one()
             builder['maintainer'] = who
-            builder['last_ping'] = dt.datetime.utcnow()
+            builder['last_ping'] = datetime.utcnow()
             s.add(Builder(**builder))
 
         for suite in suites:
             s.add(Suite(**suite))
 
+        for component in components:
+            s.add(Component(**component))
+
+        for arch in ["source", "all"]:
+            s.add(Arch(name=arch))
+
         for arch in arches:
             s.add(Arch(name=arch['name']))
 
+        for check in checks:
+            s.add(Check(**check))
+
         for group in groups:
-            arches = group.pop('arches')
             suites = group.pop('suites')
 
-            who = s.query(Person).filter_by(username=group['maintainer']).one()
+            who = s.query(Person).filter_by(email=group['maintainer']).one()
             group['maintainer'] = who
             group = Group(**group)
             s.add(group)
 
-            for arch in arches:
-                arch = s.query(Arch).filter_by(name=arch).one()
-                ga = GroupArch(group=group, arch=arch)
-                s.add(ga)
-
             for suite in suites:
-                suite = s.query(Suite).filter_by(name=suite).one()
-                ga = GroupSuite(group=group, suite=suite)
-                s.add(ga)
+                gs = GroupSuite(group=group, suite=s.query(Suite).filter_by(
+                    name=suite['suite']).one())
 
-        for check in checks:
-            group = s.query(Group).filter_by(name=check['group']).one()
-            check['group'] = group
-            s.add(Check(**check))
+                for component in suite.pop('components'):
+                    component = s.query(Component).filter_by(
+                        name=component
+                    ).one()
+                    gs.components.append(component)
+
+                for arch in ["source", "all"] + suite.pop('arches'):
+                    arch = s.query(Arch).filter_by(name=arch).one()
+                    gs.arches.append(arch)
+
+                for check in suite.pop('checks'):
+                    check = s.query(Check).filter_by(name=check).one()
+                    gs.checks.append(check)
+
+                s.add(gs)
+
+        sane = True
+        for key in obj:
+            print "Unknown key '%s' in yaml file '%s'" % (key, args.file)
+            sane = False
+
+        if not s.query(exists().where(Person.id == Person.id)).scalar():
+            print "No users in yaml file '%s'" % args.file
+            sane = False
+        elif not s.query(exists().where((Person.ssl != None) & (Person.ssl != DEADBEEF))).scalar():
+            print "No enabled users in yaml file '%s' (user 'ssl' key missing or dummy 'DEADBEEF' string)" % args.file
+            sane = False
+
+        if not s.query(exists().where(GroupSuite.id == GroupSuite.id)).scalar():
+            print "No group in yaml file '%s'" % args.file
+            sane = False
+
+        for group in s.query(Group).filter(~Group.group_suites.any()):
+            print "No suites in group '%s' " % group.name
+            sane = False
+
+        for gs in s.query(GroupSuite).filter(~GroupSuite.arches.any((Arch.name != 'source') & (Arch.name != 'all'))):
+            print "No arches in group '%s' suite '%s'" % (gs.group.name, gs.suite.name)
+            sane = False
+
+        for gs in s.query(GroupSuite).filter(~GroupSuite.components.any()):
+            print "No components in group '%s' suite '%s'" % (gs.group.name, gs.suite.name)
+            sane = False
+
+        for gs in s.query(GroupSuite).filter(~GroupSuite.checks.any()):
+            print "No checks in group '%s' suite '%s'" % (gs.group.name, gs.suite.name)
+            sane = False
+
+        if not sane and not args.force:
+            raise Exception("Sanity checks failed, use --force to override")

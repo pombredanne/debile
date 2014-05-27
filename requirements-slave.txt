@@ -1,0 +1,7 @@
+python-debian
+chardet
+pyyaml
+requests
+dput
+firehose
+schroot

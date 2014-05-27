@@ -1,47 +1,63 @@
 ---
-Maintainer: # Who to send server-wide problems to
-    Name: Paul Tagliamonte
-    Email: paultag@debian.org
-
 Users:  # Users of Debile
     - name: Paul Tagliamonte
-      username: paultag
-      key: 57DC4BD33F73E0CDBA98D22AF7EBEE8EB7982329
       email: paultag@debian.org
-      password: s3kr37
+      pgp: 57DC4BD33F73E0CDBA98D22AF7EBEE8EB7982329
+      ssl: 0000000000000000DEADBEEF0000000000000000
+
+    - name: Archive Rebuilder
+      email: help@debuild.me
+      pgp: 2EA5C67F0A37D37C64C7B5EDC0A1FC9FD80D7B69
+      ssl: 0000000000000000DEADBEEF0000000000000000
 
 Builders:  # Machines that can build
     - name: leliel.pault.ag
-      key: A998491ADCCB93C7A73A27403D3FDC7A47036CF7
-      maintainer: paultag
-      password: s3kr37
+      maintainer: paultag@debian.org
+      pgp: 21CAF89F520676541CD7088849E9153AF7901FAE
+      ssl: 0000000000000000DEADBEEF0000000000000000
 
-Checks:
-    - name: lintian
-      group: default
-      source: true
-      binary: true
-      arched: false
-
-    - name: build
-      group: default
-      source: true
-      binary: false
-      arched: true
-
-Arches:
-    - name: amd64
-    - name: all
+    - name: helios.pault.ag
+      maintainer: paultag@debian.org
+      pgp: 0C267E932994895CDE7B6B3ECB4315D1BC490D41
+      ssl: 0000000000000000DEADBEEF0000000000000000
 
 Suites:
     - name: unstable
+    - name: testing
     - name: stable
+
+Components:
+    - name: main
+    - name: contrib
+    - name: non-free
+
+Arches:
+    - name: amd64
+    - name: i386
+
+Checks:
+    - name: lintian
+      source: true
+      binary: true
+      build: false
+
+    - name: build
+      source: false
+      binary: false
+      build: true
 
 Groups:
     - name: default
-      maintainer: paultag
-      arches:
-          - amd64
-          - all
+      maintainer: paultag@debian.org
+
       suites:
-          - unstable
+          - suite: unstable
+            components:
+                - main
+                - contrib
+            arches:
+                - amd64
+                - i386
+            checks:
+                - build
+                - lintian

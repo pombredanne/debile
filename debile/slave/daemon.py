@@ -20,26 +20,25 @@
 # DEALINGS IN THE SOFTWARE.
 
 from debile.slave.commands import PLUGINS, load_module
-from debile.slave.client import get_proxy
-from contextlib import contextmanager
-from debile.slave.core import config
 from debile.slave.utils import tdir, cd, upload
-from debile.utils.aget import aget
-from debile.utils.bget import bget
-from debile.utils.dud import Dud_
+from debile.utils.commands import safe_run
+from debile.utils.log import start_logging
+from debile.utils.deb822 import Changes
 
+from contextlib import contextmanager
+from email.utils import formatdate
 from firehose.model import (Analysis, Generator, Metadata,
                             DebianBinary, DebianSource)
 
+import signal
 import logging
-from logging.handlers import SysLogHandler
-import glob
 import time
 
-proxy = get_proxy()
+
+shutdown_request = False
 
 
-class IDidNothingError(Exception):
+class IDidNothingException(Exception):
     pass
 
 
@@ -84,158 +83,180 @@ def create_firehose(package, version_getter):
 
 
 @contextmanager
-def checkout(job, package):
+def checkout(package):
     with tdir() as path:
         with cd(path):
-            server_info = proxy.get_info()
-            src = package['source']
-            archive = "{url}/{group}".format(url=server_info['repo']['base'],
-                                             group=src['group'],)
             if package['type'] == "source":
-                yield aget(archive, src['suite'], 'main',
-                           src['name'], src['version'])
+                safe_run(["dget", "-u", "-d", package['source']['dsc_url']])
+                yield package['source']['dsc_filename']
             elif package['type'] == "binary":
-                arch = job['arch']
-                if arch == 'all':
-                    arch = 'amd64'  # XXX: THIS IS A HACK. FIX THIS.
-                yield bget(archive, src['suite'], 'main',
-                           arch, src['name'], src['version'])
+                files = []
+                for deb in package['binary']['debs']:
+                    files += [deb['filename']]
+                    safe_run(["dget", "-u", "-d", deb['url']])
+                yield files
             else:
                 raise Exception
 
 
 @contextmanager
-def workon(suites, arches, capabilities):
+def workon(proxy, suites, components, arches, capabilities):
     logger = logging.getLogger('debile')
-    job = proxy.get_next_job(suites, arches, capabilities)
+    logger.debug("Checking for new jobs")
+
+    try:
+        job = proxy.get_next_job(suites, components, arches, capabilities)
+    except:
+        logger.error("Error while requesting a job from the master", exc_info=True)
+        raise
+
     if job is None:
-        yield
-    else:
-        logger.info("Acquired job id=%s (%s) for %s/%s",
-                     job['id'], job['name'], job['suite'], job['arch'])
-        try:
-            yield job
-        except:
-            logger.warn("Forfeiting the job because of internal exception")
-            proxy.forfeit_job(job['id'])
-            raise
-        else:
-            logger.info("Successfully closing the job")
-            proxy.close_job(job['id'], job['failed'])
+        logger.info("Nothing to do for now")
+        raise IDidNothingException
 
-
-def iterate():
-    arches = config['arches']
-    suites = config['suites']
-    checks = config.get('checks', list(PLUGINS.keys()))
-
-    # job is a serialized dictionary from debile-master ORM
-    with workon(suites, arches, checks) as job:
-        if job is None:
-            raise IDidNothingError("No more jobs")
-
-        source = proxy.get_source(job['source_id'])
-
-        package = {
-            "name": source['name'],
-            "version": source['version'],
-            "type": "source",
-            "arch": "all",
-            "source": source,
-            "binary": None,
-        }
-
-        if job['binary_id']:
-            binary = proxy.get_binary(job['binary_id'])
-            package = {
-                "name": binary['name'],
-                "version": binary['version'],
-                "type": "binary",
-                "arch": binary['arch'],
-                "source": source,
-                "binary": binary,
-            }
-
-        with checkout(job, package) as check:
-            run, version = load_module(job['name'])
-            firehose = create_firehose(package, version)
-
-            type_ = package['type']
-            if type_ == "source":
-                target = check  # Only get one.
-            elif type_ == "binary":
-                target = check  # tons and tons
-            else:
-                raise Exception("Unknown type")
-
-            firehose, log, failed, changes = run(
-                target, package, job, firehose)
-
-            prefix = "%s" % (str(job['id']))
-
-            dudf = "{prefix}.dud".format(prefix=prefix)
-            dud = Dud_()
-            dud['Created-By'] = "Dummy Entry <dummy@example.com>"
-            dud['Source'] = package['source']['name']
-            dud['Version'] = package['source']['version']
-            dud['Architecture'] = package['arch']
-            dud['X-Debile-Failed'] = "Yes" if failed else "No"
-            if type_ == 'binary':
-                dud['Binary'] = package['binary']['name']
-
-            job['failed'] = failed
-
-            with open('{prefix}.firehose.xml'.format(
-                    prefix=prefix), 'wb') as fd:
-                fd.write(firehose.to_xml_bytes())
-
-            dud.add_file('{prefix}.firehose.xml'.format(prefix=prefix))
-
-            with open('{prefix}.log'.format(prefix=prefix), 'wb') as fd:
-                fd.write(log.encode('utf-8'))
-
-            dud.add_file('{prefix}.log'.format(prefix=prefix))
-
-            with open(dudf, 'w') as fd:
-                dud.dump(fd=fd)
-
-            if changes:
-                upload(changes, job, package)
-
-            upload(dudf, job, package)
-
-
-def main():
-    logging.basicConfig(
-        format='%(asctime)s - %(levelname)8s - [debile-master] %(message)s',
-        level=logging.DEBUG
+    logger.info(
+        "Acquired job id=%s (%s %s) for %s",
+        job['id'],
+        job['source'],
+        job['name'],
+        job['suite'],
     )
 
-    #logger = logging.getLogger('debile')
-    #logger.setLevel(logging.DEBUG)
-    #syslog = SysLogHandler(address='/dev/log')
-    #formatter = logging.Formatter('[debile-slave] %(levelname)7s - %(message)s')
-    #syslog.setFormatter(formatter)
-    #logger.addHandler(syslog)
-    #logger.info("Booting debile-slave daemon")
+    try:
+        yield job
+    except (SystemExit, KeyboardInterrupt):
+        logger.info("Forfeiting the job because of shutdown request")
+        proxy.forfeit_job(job['id'])
+        raise
+    except:
+        logger.warn("Forfeiting the job because of internal exception", exc_info=True)
+        proxy.forfeit_job(job['id'])
+        raise
+    else:
+        logger.info("Successfully closing the job")
+        proxy.close_job(job['id'], job['failed'])
 
-    logger = logging
-    logger.info("Booting debile-masterd daemon")
+
+def run_job(config, job):
+    group = job['group_obj']
+    source = job['source_obj']
+    binary = job['binary_obj']
+
+    package = {
+        "name": source['name'],
+        "version": source['version'],
+        "type": "source" if binary is None else "binary",
+        "arch": job['arch'],
+        "affinity": source['affinity'] if job['arch'] in ["all", "source"] else job['arch'],
+        "suite": source['suite'],
+        "component": source['component'],
+        "group": group,
+        "source": source,
+        "binary": binary,
+    }
+
+    with checkout(package) as target:
+        run, version = load_module(job['check'])
+        firehose = create_firehose(package, version)
+
+        firehose, log, failed, changes = run(
+            target, package, job, firehose)
+
+        datestr = formatdate()
+        binstr = None
+
+        if changes:
+            f = open(changes, 'r')
+            obj = Changes(f)
+            obj['Distribution'] = source['suite']
+            obj['X-Debile-Group'] = source['group']
+            obj['X-Debile-Job'] = str(job['id'])
+            obj.dump(fd=open(changes, 'wb'))
+
+            datestr = obj['Date']
+            binstr = obj['Binary']
+        elif binary:
+            binstr = " ".join(deb['filename'].partition("_")[0] for deb in binary['debs'])
+
+        dud = Changes()
+        dud['Format'] = "1.8"
+        dud['Date'] = datestr
+        dud['Source'] = source['name']
+        if binstr:
+            dud['Binary'] = binstr
+        dud['Version'] = source['version']
+        dud['Architecture'] = job['arch']
+        dud['Distribution'] = source['suite']
+        dud['X-Debile-Group'] = source['group']
+        dud['X-Debile-Check'] = job['check']
+        dud['X-Debile-Job'] = str(job['id'])
+        dud['X-Debile-Failed'] = "Yes" if failed else "No"
+
+        job['failed'] = failed
+
+        _, _, v = source['version'].rpartition(":")
+        prefix = "%s_%s_%s.%d" % (source['name'], v, job['arch'], job['id'])
+
+        with open('{prefix}.firehose.xml'.format(
+                prefix=prefix), 'wb') as fd:
+            fd.write(firehose.to_xml_bytes())
+        dud.add_file('{prefix}.firehose.xml'.format(prefix=prefix))
+
+        with open('{prefix}.log'.format(prefix=prefix), 'wb') as fd:
+            fd.write(log.encode('utf-8'))
+        dud.add_file('{prefix}.log'.format(prefix=prefix))
+
+        dudf = "{prefix}.dud".format(prefix=prefix)
+        with open(dudf, 'w') as fd:
+            dud.dump(fd=fd)
+
+        if changes:
+            upload(changes, job, config['gpg'], config['dput']['host'])
+        upload(dudf, job, config['gpg'], config['dput']['host'])
+
+
+def system_exit_handler(signum, frame):
+    raise SystemExit(1)
+
+
+def shutdown_request_handler(signum, frame):
+    global shutdown_request
+    shutdown_request = True
+
+
+def main(args, config, proxy):
+    start_logging(args)
+
+    # Reset the logging config in python-dput and use the global config instead
+    dputlog = logging.getLogger('dput')
+    dputlog.propagate = True
+    dputlog.setLevel(logging.NOTSET)
+    while len(dputlog.handlers) > 0:
+        dputlog.removeHandler(dputlog.handlers[-1])
+
+    signal.signal(signal.SIGQUIT, system_exit_handler)
+    signal.signal(signal.SIGABRT, system_exit_handler)
+    signal.signal(signal.SIGTERM, system_exit_handler)
+
+    signal.signal(signal.SIGHUP,  signal.SIG_IGN)
+    signal.signal(signal.SIGUSR1, shutdown_request_handler)
+
+    suites = config['suites']
+    components = config['components']
+    arches = config['arches']
+    checks = config.get('checks', list(PLUGINS.keys()))
 
     while True:
         try:
-            logger.debug("Checking for new jobs")
-            iterate()
-        except IDidNothingError:
-            logger.debug("Nothing to do for now, sleeping 30s")
-            time.sleep(30)
-        except Exception as e:
-            logger.warning(
-                "Er, we got a fatal error: %s. Restarting in a minute" % (
-                    str(e)
-            ))
-
-            import traceback
-            logger.warning(traceback.format_exc())
-
+            with workon(proxy, suites, components, arches, checks) as job:
+                run_job(config, job)
+            if shutdown_request:
+                raise SystemExit(0)
+        except KeyboardInterrupt:
+            raise SystemExit(1)
+        except SystemExit:
+            raise
+        except:
+            if shutdown_request:
+                raise SystemExit(0)
             time.sleep(60)

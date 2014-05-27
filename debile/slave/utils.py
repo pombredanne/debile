@@ -19,17 +19,13 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from debile.slave.error import EthelError
-from debile.slave.core import config
+from debile.utils.commands import run_command
 import dput
 
 from contextlib import contextmanager
 from schroot import schroot
-from debian import deb822
-import subprocess
 import tempfile
 import shutil
-import shlex
 import sys
 import os
 
@@ -74,70 +70,7 @@ def cd(where):
         os.chdir(ncwd)
 
 
-def run_command(command, stdin=None):
-    if not isinstance(command, list):
-        command = shlex.split(command)
-    try:
-        pipe = subprocess.Popen(command, shell=False,
-                                stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-    except OSError:
-        return (None, None, -1)
-
-    kwargs = {}
-    if stdin:
-        kwargs['input'] = stdin.read()
-
-    (output, stderr) = pipe.communicate(**kwargs)
-    output, stderr = (c.decode('utf-8',
-                               errors='ignore') for c in (output, stderr))
-    return (output, stderr, pipe.returncode)
-
-
-def safe_run(cmd, expected=0):
-    if not isinstance(expected, tuple):
-        expected = (expected, )
-
-    out, err, ret = run_command(cmd)
-
-    if not ret in expected:
-        print(err)
-        e = EthelSubprocessError(out, err, ret, cmd)
-        raise e
-
-    return out, err
-
-
-def dget(url):
-    # TODO : add some logging here, useful to setup correctly the
-    # "pool_url" parameter in debile-master
-    safe_run(["dget", "-u", "-d", url])
-
-
-class EthelSubprocessError(EthelError):
-    def __init__(self, out, err, ret, cmd):
-        super(EthelError, self).__init__()
-        self.out = out
-        self.err = err
-        self.ret = ret
-        self.cmd = cmd
-
-
-def jobize(path, job):
-    f = open(path, 'r')
-    obj = deb822.Deb822(f)
-    obj['X-Debile-Job'] = str(job['id'])
-    obj.dump(fd=open(path, 'wb'))
-    return obj
-
-
-def prepare_binary_for_upload(changes, job):
-    jobize(changes, job)
-    gpg = config.get('gpg', None)
-    if gpg is None:
-        raise Exception("No GPG in config YAML")
-
+def sign(changes, gpg):
     if changes.endswith(".dud"):
         out, err, ret = run_command(['gpg', '-u', gpg, '--clearsign', changes])
         if ret != 0:
@@ -156,6 +89,6 @@ def prepare_binary_for_upload(changes, job):
         return
 
 
-def upload(changes, job, package):
-    prepare_binary_for_upload(changes, job)
-    return dput.upload(changes, config['dput']['host'])
+def upload(changes, job, gpg, host):
+    sign(changes, gpg)
+    return dput.upload(changes, host)

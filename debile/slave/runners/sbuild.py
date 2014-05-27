@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+#
 # Copyright (c) 2012-2013 Paul Tagliamonte <paultag@debian.org>
 # Copyright (c) 2013 Leo Cavaille <leo@cavaille.net>
 #
@@ -19,12 +21,11 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from debile.slave.utils import run_command
+from debile.utils.commands import run_command
 
 from firehose.model import Stats
 import firehose.parsers.gcc as fgcc
 
-from schroot import schroot
 from datetime import timedelta
 from io import StringIO
 import glob
@@ -73,32 +74,75 @@ def parse_sbuild_log(log, sut):
     return obj
 
 
-def sbuild(package, suite, arch, analysis):
-    #chroot_name = "%s-%s" % (suite, arch)
-    chroot_name = suite
+def ensure_chroot_sanity(chroot_name):
+    out, ret, err = run_command(['schroot', '-l'])
+    for chroot in out.splitlines():
+        chroot = chroot.strip()
+        chroots = [
+            chroot,
+            "chroot:%s" % (chroot)
+        ]
+        if chroot in chroots:
+            return True
+    raise ValueError("No such schroot (%s) found." % (chroot_name))
 
-    dsc = os.path.basename(package)
-    if not dsc.endswith('.dsc'):
+
+def sbuild(package, suite, affinity, build_arch, build_indep, analysis):
+    chroot_name = "{suite}-{affinity}".format(suite=suite, affinity=affinity)
+
+    ensure_chroot_sanity(chroot_name)
+
+    if not package.endswith('.dsc'):
         raise ValueError("WTF")
 
-    source, dsc = dsc.split("_", 1)
-    version, _ = dsc.rsplit(".", 1)
-    local = None
-    if "-" in version:
-        version, local = version.rsplit("-", 1)
+    sbuild_cmd = ["sbuild",
+                  "--dist={suite}".format(suite=suite),
+                  "--arch={affinity}".format(affinity=affinity),
+                  "--chroot={chroot_name}".format(chroot_name=chroot_name),
+                  "--verbose"]
+    if build_indep:
+        sbuild_cmd += ["-A"]
+        if not build_arch:
+            sbuild_cmd += ["--debbuildopt=-A"]
+    sbuild_cmd += [package]
 
-    out, err, ret = run_command([
-        "sbuild",
-        ("--arch-all" if arch == 'all' else '--no-arch-all'),
-        "-c", chroot_name,
-        "-v",
-        "-d", suite,
-        "-j", "8",
-        package,
-    ])
+    out, err, ret = run_command(sbuild_cmd)
 
-    ftbfs = ret != 0
-    return analysis, out, ftbfs, glob.glob("*changes")
+    summary = False
+    status = None
+    failstage = None
+    for line in out.splitlines():
+        if line == u"│ Summary                                                                      │":
+            summary = True
+        if summary and line.startswith("Status: "):
+            status = line.replace("Status: ", "")
+        if summary and line.startswith("Fail-Stage: "):
+            failstage = line.replace("Fail-Stage: ", "")
+
+    if (not summary or
+            ((status == "failed" or
+              status == "skipped") and
+             (failstage == "abort" or
+              failstage == "init" or
+              failstage == "create-session" or
+              failstage == "create-build-dir" or
+              failstage == "lock-session" or
+              failstage == "apt-get-clean" or
+              failstage == "apt-get-update" or
+              failstage == "apt-get-dist-upgrade" or
+              failstage == "apt-get-upgrade" or
+              failstage == "arch-check" or
+              failstage == "check-space" or
+              failstage == "chroot-arch"))):
+        raise Exception("Sbuild failed to run. " +
+                        "Summary: \"%s\" Status: \"%s\" Fail-Stage: \"%s\"" %
+                        (summary, status, failstage))
+
+    ftbfs = ret != 0 or status != "successful"
+    base, _ = os.path.basename(package).rsplit(".", 1)
+    changes = glob.glob("{base}_*.changes".format(base=base))
+
+    return (analysis, out, ftbfs, changes)
 
 
 def version():

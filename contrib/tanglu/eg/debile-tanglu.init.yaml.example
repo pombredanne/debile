@@ -1,0 +1,101 @@
+---
+Users:  # Users of Debile
+    - name: Debian Archive Kit
+      email: dak@ftp-master.tanglu.org
+      pgp: 0000000000000000DEADBEEF0000000000000000
+      ssl: 4314BF93F9F32DAC98D2AAFF62619536F4B858AA
+
+    - name: Matthias Klumpp
+      email: mak@debian.org
+      pgp: D33A3F0CA16B0ACC51A60738494C8A5FBF4DECEB
+      ssl: 0000000000000000DEADBEEF0000000000000000
+
+    - name: Jon Severinsson
+      email: jon@severinsson.net
+      pgp: 32623A6F42F5DA4B0DBD5B2BCDBBA39E78415AD2
+      ssl: 746E9DAD20C46D97D3613AE4FBA48E9521139300
+
+    - name: Daniel Nicoletti
+      email: dantti12@gmail.com
+      pgp: 0000000000000000DEADBEEF0000000000000000
+      ssl: 0000000000000000DEADBEEF0000000000000000
+
+    - name: Philip Muškovac
+      email: yofel@kubuntu.org
+      pgp: 0000000000000000DEADBEEF0000000000000000
+      ssl: 0000000000000000DEADBEEF0000000000000000
+
+Builders:  # Machines that can build
+    - name: hydrogen
+      maintainer: dantti12@gmail.com
+      pgp: A7E53D8099BDFB202862F6D3C098C8CAEBE2B0B0
+      ssl: A71D1F14CF9E4B70DA340E736B60ED1DC1CA342F
+
+    - name: helium
+      maintainer: yofel@kubuntu.org
+      pgp: 367D333376945BAE75CB466779A21745EC78A01D
+      ssl: D0C5A9FFCCB01F41987EAF7CEE1BF193EECD2728
+
+    - name: platinum
+      maintainer: mak@debian.org
+      pgp: 03E18B20AC83877BF5D73893C8EB53012DB00180
+      ssl: 5FCCF42ABAC8B0FC10C323EF93A5951F987D2DA3
+
+    - name: caesium
+      maintainer: jon@severinsson.net
+      pgp: 517884F17B4964C46EEE3D56FFF33867C01E4D5A
+      ssl: BE6CEC446097F26FAE397B296261AE24FD07743D
+
+Suites:
+    - name: aequorea-updates
+    - name: staging
+
+Components:
+    - name: main
+    - name: contrib
+    - name: non-free
+
+Arches:
+    - name: amd64
+    - name: i386
+
+Checks:
+    - name: lintian
+      source: true
+      binary: true
+      build: false
+
+    - name: build
+      source: false
+      binary: false
+      build: true
+
+Groups:
+    - name: default
+      maintainer: mak@debian.org
+
+      suites:
+          - suite: aequorea-updates
+            components:
+                - main
+                - contrib
+                - non-free
+            arches:
+                - amd64
+                - i386
+            checks:
+                - build
+                - lintian
+
+      suites:
+          - suite: staging
+            components:
+                - main
+                - contrib
+                - non-free
+            arches:
+                - amd64
+                - i386
+            checks:
+                - build
+                - lintian

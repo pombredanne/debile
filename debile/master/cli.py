@@ -18,24 +18,58 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+
+from argparse import ArgumentParser
+from debile.master.utils import init_master
+
+
 def init():
-    from debile.master.orm import init as init_db
-    return init_db()
+    parser = ArgumentParser(description="Debile master database initialization")
+    parser.add_argument("--config", action="store", dest="config", default=None,
+                        help="Path to the master.yaml config file.")
+    parser.add_argument("--force", action="store_true", dest="force", default=False,
+                        help="Force initialization even if sanity checks fail.")
+    parser.add_argument("file", action="store",
+                        help="Yaml file with initial database.")
+
+    args = parser.parse_args()
+    config = init_master(args.config)
+
+    from debile.master.dimport import main
+    main(args, config)
 
 
 def process_incoming():
-    from debile.master.incoming import process_directory
-    import sys
-    return process_directory(*sys.argv[1:])
+    parser = ArgumentParser(description="Debile master incoming handling")
+    parser.add_argument("--config", action="store", dest="config", default=None,
+                        help="Path to the master.yaml config file.")
+    parser.add_argument("--group", action="store", dest="group", default="default",
+                        help="Group to use for uploads without a X-Debile-Group field")
+    parser.add_argument("--no-dud", action="store_false", dest="dud",
+                        help="Do not process *.dud files.")
+    parser.add_argument("--no-changes", action="store_false", dest="changes",
+                        help="Do not process *.changes files.")
+    parser.add_argument("directory", action="store",
+                        help="Directry to process.")
+
+    args = parser.parse_args()
+    config = init_master(args.config)
+
+    from debile.master.incoming import main
+    main(args, config)
 
 
-def import_db():
-    from debile.master.dimport import import_from_yaml
-    import sys
-    return import_from_yaml(*sys.argv[1:])
+def server():
+    parser = ArgumentParser(description="Debile master daemon")
+    parser.add_argument("--config", action="store", dest="config", default=None,
+                        help="Path to the master.yaml config file.")
+    parser.add_argument("-s", "--syslog", action="store_true", dest="syslog",
+                        help="Log to syslog instead of stderr.")
+    parser.add_argument("-d", "--debug", action="store_true", dest="debug",
+                        help="Enable debug messages to stderr.")
 
+    args = parser.parse_args()
+    config = init_master(args.config)
 
-def serve():
     from debile.master.server import main
-    import sys
-    return main(*sys.argv[1:])
+    main(args, config)

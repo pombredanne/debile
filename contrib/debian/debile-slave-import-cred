@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Copyright (c) Paul R. Tagliamonte <paultag@debian.org>, 2014 under the
+# terms and conditions of the Debile project, MIT/Expat. You should have
+# recieved a copy of the license with this script.
+
+if [ $# -ne 2 ]; then
+    echo "Error."
+    echo " $0 debile-user /path/to/tarfile"
+    exit 1
+fi
+
+USER=$1
+TARFILE=$2
+
+if [ ! -f "${TARFILE}" ]; then
+    echo "Error."
+    echo "Could not find ${TARFILE}"
+    exit 1
+fi
+
+if ! id $USER > /dev/null; then
+    echo "$USER does not exist"
+fi
+
+function do-import {
+    su $USER -c "tar -zxf ${TARFILE} $1 -O | gpg --import --status-fd 1"
+}
+
+function copy-ssl-cred {
+    WORKDIR=$(mktemp -d)
+    pushd ${WORKDIR} >/dev/null
+    tar -zxf ${TARFILE}
+    if test ! -f *.crt -o  ! -f  *.key; then
+        echo "Cannot find .crt or .key file";
+        exit 1
+    fi
+    cp -f *.crt *.key /etc/debile/
+    popd >/dev/null
+    rm -rf ${WORKDIR}
+
+}
+
+copy-ssl-cred
+do-import key.pub
+do-import key.priv
+exit 0

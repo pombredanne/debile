@@ -1,21 +1,24 @@
 ---
 xmlrpc:
-    user: "%leliel.pault.ag"
-    password: s3kr37
-    host: localhost
+    host: debile-master
     port: 22017
+    keyfile: /etc/debile/leliel.key
+    certfile: /etc/debile/leliel.crt
+    # ca_certs: /etc/ssl/certs/ca-certificates.crt
 
-gpg: A998491ADCCB93C7A73A27403D3FDC7A47036CF7
+gpg: 0000000000000000DEADBEEF00000000000000000
 
 dput:
-    host: lucy
-
-checks:
-    - lintian
-
-arches:
-    - amd64
-    - all
+    host: debile-master
 
 suites:
     - unstable
+
+components:
+    - main
+
+arches:
+    - amd64
+
+checks:
+    - lintian

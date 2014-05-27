@@ -24,30 +24,15 @@ import glob
 
 
 def run(dsc, package, job, firehose):
-    suite = job['suite']
-    arch = job['arch']
+    build_arch = job['arch'] != "all"
+    build_indep = job['arch'] == "all" or job['do_indep']
+    firehose, out, ftbfs, changes, = \
+        sbuild(dsc, package['suite'], package['affinity'], build_arch, build_indep, firehose)
 
-    firehose, out, ftbfs, changes, = sbuild(dsc, suite, arch, firehose)
-
-    # ['python-schroot_0.3-1.debian.tar.gz',
-    # 'python3-schroot_0.3-1_all.deb',
-    # 'python-schroot_0.3-1.dsc',
-    # 'python-schroot_0.3-1_amd64.build',
-    # 'python-schroot-0.3',
-    # 'python-schroot_0.3-1_all.deb',
-    # 'python-schroot_0.3.orig.tar.gz',
-    # 'python-schroot_0.3-1_amd64.changes',
-    # 'python-schroot_0.3-1_amd64-20131009-2159.build']
-
-    changes = "{source}_{version}*.changes".format(
-        source=package['name'],
-        version=package['version'],
-    )
-
-    changes = list(glob.glob(changes))
-
-    if changes == [] and not ftbfs:
+    if not changes and not ftbfs:
         print(out)
+        print(changes)
+        print(list(glob.glob("*")))
         raise Exception("Um. No changes but no FTBFS.")
 
     if not ftbfs:

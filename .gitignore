@@ -1,5 +1,8 @@
+ENV/
 *pyc
 *swp
 debile.db
 *debile*egg*
 build/
+debian/bin/
+
